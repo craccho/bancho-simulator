@@ -149,17 +149,18 @@ pay p c = case c of
   SuperBonus -> 0
   Blank -> 0
 
-play :: State SlotState Combination
+play :: Monad m => StateT SlotState m (Combination, SlotState)
 play = do
   s <- get
   let (p, g) = randomR (0.0, 1.0) (gen s)
   let (p', g') = randomR (0.0, 1.0) g
   let c = combiPick (regulation s) (replayMode s) p
-  put s {medals = (medals s) + pay (Push LCR LeftBar p') c - 3,
-         totalPlayCount = (totalPlayCount s) + 1,
-         partialPlayCount = (partialPlayCount s) + 1,
-         gen = g'}
-  return c
+  let s' = s {medals = (medals s) + pay (Push LCR LeftBar p') c - 3,
+              totalPlayCount = (totalPlayCount s) + 1,
+              partialPlayCount = (partialPlayCount s) + 1,
+              gen = g'}
+  put s'
+  return (c, s')
 
 initialState :: IO SlotState
 initialState = do
@@ -170,3 +171,5 @@ main = do
   s <- initialState
   putStrLn $ show s
   putStrLn $ show $ probability S1 RNormal Blank
+  log <- (`runStateT` s) $ sequence $ take 300 $ repeat play
+  putStrLn $ show log
