@@ -19,18 +19,14 @@ data Combination =
   Replay |
   SuperBonus |
   Blank
-  deriving (Show, Eq)
+  deriving (Show, Eq, Enum, Bounded)
 
 allButBlank :: [Combination]
-allButBlank = [
-  WeakCherry, StrongCherry, StrongestCherry, LeftBell,
-  CenterBell, RightBell, CommonBell, WeakBento, StrongBento,
-  Replay, SuperBonus, ChanceA, ChanceB, ChanceC ]
+allButBlank = filter (/= Blank) allCombi
 
 allCombi :: [Combination]
-allCombi = Blank : allButBlank
+allCombi = enumFrom minBound
 
-  
 data Mode =
   Reset |
   NormalA |
