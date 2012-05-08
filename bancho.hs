@@ -19,13 +19,13 @@ data Combination =
   Replay |
   SuperBonus |
   Blank
-  deriving Show
+  deriving (Show, Eq)
 
 allButBlank :: [Combination]
 allButBlank = [
   WeakCherry, StrongCherry, StrongestCherry, LeftBell,
   CenterBell, RightBell, CommonBell, WeakBento, StrongBento,
-  SuperBonus, ChanceA, ChanceB, ChanceC ]
+  Replay, SuperBonus, ChanceA, ChanceB, ChanceC ]
 
 allCombi :: [Combination]
 allCombi = Blank : allButBlank
@@ -149,18 +149,25 @@ pay p c = case c of
   SuperBonus -> 0
   Blank -> 0
 
-play :: Monad m => StateT SlotState m (Combination, SlotState)
+play :: State SlotState (Combination, SlotState)
 play = do
   s <- get
   let (p, g) = randomR (0.0, 1.0) (gen s)
   let (p', g') = randomR (0.0, 1.0) g
   let c = combiPick (regulation s) (replayMode s) p
-  let s' = s {medals = (medals s) + pay (Push LCR LeftBar p') c - 3,
+  let payout = pay (Push LCR LeftBar p') c
+  let s' = s {medals = (medals s) + payout - 3,
               totalPlayCount = (totalPlayCount s) + 1,
               partialPlayCount = (partialPlayCount s) + 1,
               gen = g'}
   put s'
   return (c, s')
+
+playUntil :: Int -> State SlotState Int
+playUntil m = do
+  play
+  s <- get
+  if medals s > m then playUntil m else return $ totalPlayCount s
 
 initialState :: IO SlotState
 initialState = do
@@ -171,5 +178,5 @@ main = do
   s <- initialState
   putStrLn $ show s
   putStrLn $ show $ probability S1 RNormal Blank
-  log <- (`runStateT` s) $ sequence $ take 300 $ repeat play
+  let log = (`runState` s) $ sequence $ take 1000 $ repeat play
   putStrLn $ show log
