@@ -114,50 +114,66 @@ combiPick reg rm p =
 data PushCombi = LCR | LRC | CLR | CRL | RLC | RCL
   deriving (Show, Eq)
 
-data Strategy = LeftBar | ArtFull
+data Strategy = LeftBar | ArtFull deriving Show
 
 data Push = Push {
   pc :: PushCombi,
-  strategy :: Strategy,
   luck :: Probability
-}
+} deriving Show
 
-pay :: Push -> Combination -> Int
-pay p c = case c of
-  WeakCherry -> 2
-  StrongCherry -> 2
-  StrongestCherry -> 2
-  LeftBell | pc p == LCR || pc p == LRC || luck p < 1/4 -> 9
-           | otherwise -> 0
-  CenterBell | pc p == CLR || pc p == CRL || luck p < 1/4 -> 9
+pay :: Strategy -> Combination -> State SlotState Int
+pay strt c = do
+  s <- get
+  let l :: Probability
+      (l, g) = randomR (0.0, 1.0) (gen s)
+      pc = case (replayMode s) of
+        RNormal -> LCR
+        RPrepare -> correct
+        RBonus -> correct
+        RRush -> correct
+        where
+        correct = case c of
+          LeftBell -> LCR
+          CenterBell -> CLR
+          RightBell -> RLC
+          otherwise -> LCR
+  put $ s {gen = g}
+  return $ case c of
+    WeakCherry -> 2
+    StrongCherry -> 2
+    StrongestCherry -> 2
+    LeftBell | pc == LCR || pc == LRC || l < 1/4 -> 9
              | otherwise -> 0
-  RightBell | pc p == RLC || pc p == RCL || luck p < 1/4 -> 9
-            | otherwise -> 0
-  CommonBell -> 9
-  WeakBento -> 5
-  StrongBento -> 5
-  ChanceA -> 9
-  ChanceB -> 9
-  ChanceC -> case strategy p of
-    LeftBar -> 0
-    ArtFull -> 1
-  Replay -> 3
-  SuperBonus -> 0
-  Blank -> 0
+    CenterBell | pc == CLR || pc == CRL || l < 1/4 -> 9
+               | otherwise -> 0
+    RightBell | pc == RLC || pc == RCL || l < 1/4 -> 9
+              | otherwise -> 0
+    CommonBell -> 9
+    WeakBento -> 5
+    StrongBento -> 5
+    ChanceA -> 9
+    ChanceB -> 9
+    ChanceC -> case strt of
+      LeftBar -> 0
+      ArtFull -> 1
+    Replay -> 3
+    SuperBonus -> 0
+    Blank -> 0
 
-play :: State SlotState (Combination, SlotState)
+play :: State SlotState (Combination, Int)
 play = do
   s <- get
   let (p, g) = randomR (0.0, 1.0) (gen s)
-  let (p', g') = randomR (0.0, 1.0) g
-  let c = combiPick (regulation s) (replayMode s) p
-  let payout = pay (Push LCR LeftBar p') c
+      c = combiPick (regulation s) (replayMode s) p
+  put $ s {gen = g}
+  payout <- pay ArtFull c
+  s <- get
   let s' = s {medals = (medals s) + payout - 3,
               totalPlayCount = (totalPlayCount s) + 1,
-              partialPlayCount = (partialPlayCount s) + 1,
-              gen = g'}
+              partialPlayCount = (partialPlayCount s) + 1
+              }
   put s'
-  return (c, s')
+  return (c, payout)
 
 playUntil :: Int -> State SlotState Int
 playUntil m = do
@@ -170,9 +186,12 @@ initialState = do
   g <- getStdGen
   return $ SlotState S1 0 0 0 Reset RNormal g
 
-main = do
+simulate :: Int -> IO ([(Combination, Int)], SlotState)
+simulate g = do
   s <- initialState
-  putStrLn $ show s
-  putStrLn $ show $ probability S1 RNormal Blank
-  let log = (`runState` s) $ sequence $ take 1000 $ repeat play
-  putStrLn $ show log
+  let log = (`runState` s) $ sequence $ take g $ repeat play
+  return $ log
+
+main = do
+  log <- simulate 1000
+  print log
