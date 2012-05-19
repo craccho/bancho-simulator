@@ -184,12 +184,12 @@ playUntil m = do
 initialState :: IO SlotState
 initialState = do
   g <- getStdGen
-  return $ SlotState S1 0 0 0 Reset RNormal g
+  return $ SlotState S1 0 0 0 Reset RBonus g
 
 simulate :: Int -> IO ([(Combination, Int)], SlotState)
 simulate g = do
   s <- initialState
-  let log = (`runState` s) $ sequence $ take g $ repeat play
+  let log = (`runState` s) $ sequence $ replicate g play
   return $ log
 
 main = do
