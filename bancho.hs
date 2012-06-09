@@ -3,44 +3,20 @@ module Bancho where
 import Control.Monad.State
 import System.Random
 
-data Combination =
-  WeakCherry |
-  StrongCherry |
-  StrongestCherry |
-  LeftBell |
-  CenterBell |
-  RightBell |
-  CommonBell |
-  WeakBento |
-  StrongBento |
-  ChanceA |
-  ChanceB |
-  ChanceC |
-  Replay |
-  SuperBonus |
-  Blank
-  deriving (Show, Eq, Enum, Bounded)
-
-allButBlank :: [Combination]
-allButBlank = filter (/= Blank) allCombi
-
-allCombi :: [Combination]
-allCombi = enumFrom minBound
+import Bancho.Combination
 
 data Mode =
   Reset |
-  NormalA |
-  NormalB |
-  HighA |
-  HighB
-  deriving Show
+  NormalA | NormalB |
+  HighA | HighB
+  deriving (Show)
 
 data ReplayMode =
   RNormal |
   RPrepare |
   RBonus |
   RRush
-  deriving Show
+  deriving (Show)
 
 data BBType =
   RedBB |
@@ -51,14 +27,6 @@ data BBType =
 data Regulation =
   S1 | S2 | S3 | S4 | S5 | S6
   deriving (Eq, Ord)
-
-instance Show Regulation where
-  show S1 = "設定1"
-  show S2 = "設定2"
-  show S3 = "設定3"
-  show S4 = "設定4"
-  show S5 = "設定5"
-  show S6 = "設定6"
 
 data SlotState = SlotState {
   regulation :: Regulation ,
@@ -71,9 +39,31 @@ data SlotState = SlotState {
   mode :: Mode ,
   replayMode :: ReplayMode ,
   gen :: StdGen
-} deriving Show
+} deriving (Show)
+
+data PushCombi = LCR | LRC | CLR | CRL | RLC | RCL
+  deriving (Show, Eq)
+
+data Strategy = LeftBar | ArtFull deriving (Show)
+
+data Push = Push {
+  pc :: PushCombi,
+  luck :: Probability
+} deriving (Show)
+
 
 type GameState = State SlotState
+
+type Probability = Double
+
+instance Show Regulation where
+  show S1 = "設定1"
+  show S2 = "設定2"
+  show S3 = "設定3"
+  show S4 = "設定4"
+  show S5 = "設定5"
+  show S6 = "設定6"
+
 
 defaultSlotState :: SlotState
 defaultSlotState = SlotState {
@@ -88,8 +78,6 @@ defaultSlotState = SlotState {
   replayMode = RNormal,
   gen = undefined
   }
-
-type Probability = Double
 
 getBB :: GameState (BBType, Int)
 getBB = do
@@ -126,8 +114,12 @@ getBB = do
   return (bbType, bbLimit)
 
 select :: [(a, Probability)] -> Probability -> a
-select ((some, _):[]) _ = some
-select ((some, c):ps) p = if p < c then some else select ps (p - c)
+select ps p = let psum = sum . map snd $ ps
+                  p' = p * psum
+              in select' ps p'
+  where
+    select' ((some, _):[]) _ = some
+    select' ((some, c):ps) p = if p < c then some else select' ps (p - c)
 
 getNormalLimit :: GameState Int
 getNormalLimit = return 50 -- TODO: select from Table
@@ -207,28 +199,11 @@ probability s rm c = case c of
     otherwise -> 1/1.55
   Blank -> 1 - sum (map (probability s rm) allButBlank)
 
-combiTable :: Regulation -> ReplayMode -> [(Probability, Combination)]
-combiTable reg rm =
-  reverse $ foldl (\rs c ->
-    let r = head rs in [(fst r + probability reg rm c, c)] ++ rs
-  ) [(probability reg rm Blank, Blank)] allButBlank
+combiTable :: Regulation -> ReplayMode -> [(Combination, Probability)]
+combiTable reg rm = map (\c -> (c, probability reg rm c)) allCombi
 
 combiPick :: Regulation -> ReplayMode -> Probability -> Combination
-combiPick reg rm p =
-  let ct = combiTable reg rm
-      pick p (pc:sct) = if p < fst pc then snd pc else pick p sct
-      pick p [] = Blank
-  in pick p ct
-
-data PushCombi = LCR | LRC | CLR | CRL | RLC | RCL
-  deriving (Show, Eq)
-
-data Strategy = LeftBar | ArtFull deriving Show
-
-data Push = Push {
-  pc :: PushCombi,
-  luck :: Probability
-} deriving Show
+combiPick reg rm p = select (combiTable reg rm) p
 
 pay :: Strategy -> Combination -> GameState Int
 pay strt c = do
