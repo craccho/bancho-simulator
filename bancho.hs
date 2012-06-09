@@ -73,6 +73,8 @@ data SlotState = SlotState {
   gen :: StdGen
 } deriving Show
 
+type GameState = State SlotState
+
 defaultSlotState :: SlotState
 defaultSlotState = SlotState {
   regulation = S1,
@@ -89,7 +91,7 @@ defaultSlotState = SlotState {
 
 type Probability = Double
 
-getBB :: State SlotState (BBType, Int)
+getBB :: GameState (BBType, Int)
 getBB = do
   s <- get
   let table = case mode s of
@@ -127,10 +129,10 @@ select :: [(a, Probability)] -> Probability -> a
 select ((some, _):[]) _ = some
 select ((some, c):ps) p = if p < c then some else select ps (p - c)
 
-getNormalLimit :: State SlotState Int
+getNormalLimit :: GameState Int
 getNormalLimit = return 50 -- TODO: select from Table
 
-processPartialCount :: State SlotState Int
+processPartialCount :: GameState Int
 processPartialCount = do
   s <- get
   let pp = partialPlayCount s
@@ -228,7 +230,7 @@ data Push = Push {
   luck :: Probability
 } deriving Show
 
-pay :: Strategy -> Combination -> State SlotState Int
+pay :: Strategy -> Combination -> GameState Int
 pay strt c = do
   s <- get
   let l :: Probability
@@ -267,14 +269,14 @@ pay strt c = do
     SuperBonus -> 0
     Blank -> 0
 
-feedProb :: (Probability -> a) -> State SlotState a
+feedProb :: (Probability -> a) -> GameState a
 feedProb f = do
   s <- get
   let (p, g) = randomR (0.0, 1.0) (gen s)
   put $ s {gen = g}
   return $ f p
 
-play :: State SlotState (Combination, Int)
+play :: GameState (Combination, Int)
 play = do
   s <- get
   c <- feedProb $ combiPick (regulation s) (replayMode s)
@@ -286,7 +288,7 @@ play = do
   processPartialCount
   return (c, payout)
 
-playUntil :: Int -> State SlotState Int
+playUntil :: Int -> GameState Int
 playUntil m = do
   play
   s <- get
