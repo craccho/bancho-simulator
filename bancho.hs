@@ -42,6 +42,12 @@ data ReplayMode =
   RRush
   deriving Show
 
+data BBType =
+  RedBB |
+  BlueBB |
+  Regular
+  deriving (Show)
+
 data Regulation =
   S1 | S2 | S3 | S4 | S5 | S6
   deriving (Eq, Ord)
@@ -58,13 +64,114 @@ data SlotState = SlotState {
   regulation :: Regulation ,
   totalPlayCount :: Int ,
   partialPlayCount :: Int ,
+  limitGameCount :: Int ,
+  bbPlayCount :: Int ,
+  bbType :: BBType ,
   medals :: Int ,
   mode :: Mode ,
   replayMode :: ReplayMode ,
   gen :: StdGen
 } deriving Show
 
+defaultSlotState :: SlotState
+defaultSlotState = SlotState {
+  regulation = S1,
+  totalPlayCount = 0,
+  partialPlayCount = 0,
+  limitGameCount = 600,
+  bbPlayCount = 0,
+  bbType = RedBB,
+  medals = 0,
+  mode = Reset,
+  replayMode = RNormal,
+  gen = undefined
+  }
+
 type Probability = Double
+
+getBB :: State SlotState (BBType, Int)
+getBB = do
+  s <- get
+  let table = case mode s of
+        Reset ->
+          bbt 0.26 0.732 0.008
+        NormalA -> case regulation s of
+          S1 -> bbt 0.500 0.485 0.016
+          S2 -> bbt 0.530 0.454 0.016
+          S3 -> bbt 0.500 0.485 0.016
+          S4 -> bbt 0.530 0.454 0.016
+          S5 -> bbt 0.484 0.500 0.016
+          S6 -> bbt 0.435 0.549 0.016
+      bbt rb bbr bbb = [(Regular, rb), (RedBB, bbr), (BlueBB, bbb)]
+  bbType <- feedProb $ select table
+  bbLimit <- case bbType of
+        Regular -> return 30
+        otherwise -> do
+          let gt = case regulation s of
+                S1 -> s13
+                S2 -> s13
+                S3 -> s13
+                S4 -> s45
+                S5 -> s45
+                S6 -> s6
+              s13 = bt 49.10 44.59 4.25 1.40    0 0.14 0.04 0.04 0.39
+              s45 = bt 49.19 44.61 4.18 1.22    0 0.29 0.04 0.04 0.39
+              s6  = bt 44.79 48.91 4.32 1.21 0.39 0.19 0.03 0.03 0.09
+              bt = \g60 g90 g120 g150 g180 g210 g240 g270 g300 -> map (\(a, b) -> (a, b / 10))
+                [(60, g60), (90, g90), (120, g120), (150, g150), (180, g180), (210, g210),
+                 (240, g240), (270, g270), (300, g300)]
+          feedProb $ select gt
+  return (bbType, bbLimit)
+
+select :: [(a, Probability)] -> Probability -> a
+select ((some, _):[]) _ = some
+select ((some, c):ps) p = if p < c then some else select ps (p - c)
+
+getNormalLimit :: State SlotState Int
+getNormalLimit = return 50 -- TODO: select from Table
+
+processPartialCount :: State SlotState Int
+processPartialCount = do
+  s <- get
+  let pp = partialPlayCount s
+      lg = limitGameCount s
+  case replayMode s of
+    RNormal -> do
+      if pp > lg then do
+        (bbType, newLimit) <- getBB
+        put $ s {
+          partialPlayCount = 0 ,
+          limitGameCount = newLimit ,
+          replayMode = RBonus ,
+          bbType = bbType
+          }
+        return newLimit
+      else do
+        put $ s {
+          partialPlayCount = pp + 1
+          }
+        return lg
+
+    RBonus -> do
+      if pp > lg then do
+        newLimit <- getNormalLimit
+        put $ s {
+          partialPlayCount = 0 ,
+          limitGameCount = newLimit ,
+          replayMode = RNormal
+          }
+        return newLimit
+      else do
+        put $ s {
+          partialPlayCount = pp + 1
+          }
+        return lg
+
+    otherwise -> do
+      put $ s {
+        partialPlayCount = pp + 1
+        }
+      return lg
 
 probability :: Regulation -> ReplayMode -> Combination -> Probability
 probability s rm c = case c of
@@ -160,19 +267,23 @@ pay strt c = do
     SuperBonus -> 0
     Blank -> 0
 
+feedProb :: (Probability -> a) -> State SlotState a
+feedProb f = do
+  s <- get
+  let (p, g) = randomR (0.0, 1.0) (gen s)
+  put $ s {gen = g}
+  return $ f p
+
 play :: State SlotState (Combination, Int)
 play = do
   s <- get
-  let (p, g) = randomR (0.0, 1.0) (gen s)
-      c = combiPick (regulation s) (replayMode s) p
-  put $ s {gen = g}
+  c <- feedProb $ combiPick (regulation s) (replayMode s)
   payout <- pay ArtFull c
-  s <- get
-  let s' = s {medals = (medals s) + payout - 3,
-              totalPlayCount = (totalPlayCount s) + 1,
-              partialPlayCount = (partialPlayCount s) + 1
-              }
-  put s'
+  modify $ \s -> s {medals = (medals s) + payout - 3,
+                    totalPlayCount = (totalPlayCount s) + 1,
+                    partialPlayCount = (partialPlayCount s) + 1
+  }
+  processPartialCount
   return (c, payout)
 
 playUntil :: Int -> State SlotState Int
@@ -184,7 +295,7 @@ playUntil m = do
 initialState :: IO SlotState
 initialState = do
   g <- getStdGen
-  return $ SlotState S1 0 0 0 Reset RBonus g
+  return $ defaultSlotState { replayMode = RNormal, gen = g }
 
 simulate :: Int -> IO ([(Combination, Int)], SlotState)
 simulate g = do
@@ -193,5 +304,6 @@ simulate g = do
   return $ log
 
 main = do
-  log <- simulate 1000
+  newStdGen
+  log <- simulate 7000
   print log
