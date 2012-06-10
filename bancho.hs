@@ -16,7 +16,7 @@ data ReplayMode =
   RPrepare |
   RBonus |
   RRush
-  deriving (Show)
+  deriving (Show, Eq)
 
 data BBType =
   RedBB |
@@ -38,6 +38,7 @@ data SlotState = SlotState {
   medals :: Int ,
   mode :: Mode ,
   replayMode :: ReplayMode ,
+  combination :: Combination ,
   gen :: StdGen
 } deriving (Show)
 
@@ -76,6 +77,7 @@ defaultSlotState = SlotState {
   medals = 0,
   mode = Reset,
   replayMode = RNormal,
+  combination = Blank,
   gen = undefined
   }
 
@@ -250,6 +252,45 @@ processPartialCount = do
         }
       return lg
 
+processShorCut :: GameState Bool
+processShorCut = do -- TODO: full
+  s <- get
+  let reg = regulation s
+      c = combination s
+      p = case c of
+        WeakBento -> 0.5
+        WeakCherry -> rt 1.50 2.41 1.50 2.41 1.50 2.54
+        StrongCherry -> rt 16.48 18.31 16.48 18.31 16.48 18.31
+        ChanceA -> ch
+        ChanceB -> ch
+        ChanceC -> ch
+        otherwise -> 0
+      ch = rt 11.29 12.51 11.29 12.51 11.47 13.13
+      rt s1 s2 s3 s4 s5 s6 =
+        maybe 0 id (lookup reg [(S1, s1), (S2, s2), (S3, s3), (S4, s4), (S5, s5), (S6, s6)])
+      pp = partialPlayCount s
+      lg = limitGameCount s
+      rm = replayMode s
+  b <- feedProb $ \p' -> p' < p
+  let b' = rm /= RBonus
+  if b then do
+    let g = round $ case c of
+          WeakBento -> 4.7
+          WeakCherry -> 4.7
+          StrongCherry -> 17.8
+          ChanceA -> 17.8
+          ChanceB -> 17.8
+          ChanceC -> 17.8
+    if lg - pp > g then do
+      let lg' = pp + g
+      put s { limitGameCount = lg' }
+      return True
+    else
+      return False
+  else
+    return False
+
+
 probability :: Regulation -> ReplayMode -> Combination -> Probability
 probability s rm c = case c of
   WeakCherry -> 1/119.16
@@ -343,8 +384,10 @@ play = do
   payout <- pay ArtFull c
   modify $ \s -> s {medals = (medals s) + payout - 3,
                     totalPlayCount = (totalPlayCount s) + 1,
-                    partialPlayCount = (partialPlayCount s) + 1
+                    partialPlayCount = (partialPlayCount s) + 1,
+                    combination = c
   }
+  processShorCut
   processPartialCount
   s <- get
   return $ medals s
@@ -365,6 +408,17 @@ simulate reg g = do
   s <- initialState reg
   let log = (`runState` s) $ sequence $ replicate g play
   return $ log
+
+graph :: Regulation -> Int -> IO SlotState
+graph reg game = do
+  newStdGen
+  (log, s) <- simulate reg game
+  mapM_ (\v -> putStrLn $ replicate (round (fromIntegral (abs v) / 100)) ' ' ++ "*") $ shorten 100 log
+  return s
+
+shorten :: Int -> [a] -> [a]
+shorten n (x:xs) = x:shorten n (drop n xs)
+shorten _ [] = []
 
 main = do
   newStdGen
