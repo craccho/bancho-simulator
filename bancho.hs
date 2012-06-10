@@ -122,7 +122,40 @@ select ps p = let psum = sum . map snd $ ps
     select' ((some, c):ps) p = if p < c then some else select' ps (p - c)
 
 getNormalLimit :: GameState Int
-getNormalLimit = return 50 -- TODO: select from Table
+getNormalLimit = do
+  s <- get
+  let m = mode s
+      reg = regulation s
+      table = case m of
+        Reset -> ta
+        NormalA -> ta
+        NormalB -> case reg of
+          S1 -> gt 0.40 0.40 0.79 1.93 10.03 4.31 15.28 3.33 19.20 2.21 12.73 1.47 8.32 0.04 19.27
+          S2 -> gt 0.41 0.41 0.81 1.95 10.51 4.50 15.86 3.43 19.58 2.23 12.71 1.45 8.13 0.04 17.73
+          S3 -> gt 0.40 0.40 0.79 1.93 10.03 4.31 15.28 3.33 19.20 2.21 12.73 1.47 8.32 0.04 19.27
+          S4 -> gt 0.42 0.42 0.84 1.98 10.64 4.59 15.93 3.49 19.56 2.26 12.64 1.46 8.05 0.04 17.43
+          S5 -> gt 0.40 0.40 0.79 1.93 10.03 4.31 15.28 3.33 19.20 2.21 12.73 1.47 8.32 0.04 19.27
+          S6 -> gt 0.79 0.79 1.55 2.65 13.86 6.56 17.92 4.56 19.24 2.62 11.05 1.50 6.15 0.06 10.71
+        HighA -> gtt 10 20 50 20
+        HighB -> gtt 8.45 18.31 36.62 36.62
+      ta = case reg of
+        S1 -> gt 1.20 2.66 5.16 2.15 1.04 26.42 0.69 18.26 0.48 12.62 0.33 8.72 0.12 17.94 2.19
+        S2 -> gt 1.21 2.67 5.18 2.16 1.09 27.50 0.71 18.65 0.48 12.65 0.33 8.58 0.11 16.63 2.03
+        S3 -> gt 1.20 2.66 5.16 2.15 1.04 26.42 0.69 18.26 0.48 12.62 0.33 8.72 0.12 17.94 2.19
+        S4 -> gt 1.67 3.76 5.78 4.24 1.06 24.98 0.71 17.29 0.49 11.97 0.34 8.29 0.12 16.08 3.22
+        S5 -> gt 1.64 3.73 5.74 4.21 0.94 23.90 0.64 16.90 0.45 11.95 0.32 8.44 0.12 17.43 3.59
+        S6 -> gt 2.03 4.09 6.35 4.73 2.70 26.14 1.63 17.68 1.02 11.11 0.64 6.98 0.21 10.48 4.20
+      gt r16 r32 r64 r96 r200 r300 r400 r500 r600 r700 r800 r900 r951 r967 r999 =
+        [([1..16], r16), ([17..32], r32), ([33..64], r64), ([65..96], r96), ([97..200], r200),
+         ([201..300], r300), ([301..400], r400), ([401..500], r500), ([501..600], r600),
+         ([601..700], r700), ([701..800], r800), ([801..900], r900),
+         ([901..951], r951), ([952..967], r967), ([968..999], r999)]
+      gtt r16 r32 r64 r96 = [([1..16], r16), ([17..32], r32), ([33..64], r64), ([65..96], r96)]
+  ptable <- feedProb $ select table
+  let rtable = case length ptable of
+        100 -> zip [head ptable ..] $ (replicate 32 0) ++ (replicate 32 (1 / 32)) ++ (replicate 36 0)
+        l -> zip [head ptable ..] (replicate l (1 / fromIntegral l))
+  feedProb $ select rtable
 
 processPartialCount :: GameState Int
 processPartialCount = do
@@ -269,18 +302,18 @@ playUntil m = do
   s <- get
   if medals s > m then playUntil m else return $ totalPlayCount s
 
-initialState :: IO SlotState
-initialState = do
+initialState :: Regulation -> IO SlotState
+initialState reg = do
   g <- getStdGen
-  return $ defaultSlotState { replayMode = RNormal, gen = g }
+  return $ defaultSlotState { replayMode = RNormal, gen = g, regulation = reg }
 
-simulate :: Int -> IO ([(Combination, Int)], SlotState)
-simulate g = do
-  s <- initialState
+simulate :: Regulation -> Int -> IO ([(Combination, Int)], SlotState)
+simulate reg g = do
+  s <- initialState reg
   let log = (`runState` s) $ sequence $ replicate g play
   return $ log
 
 main = do
   newStdGen
-  log <- simulate 7000
+  log <- simulate S1 7000
   print log
