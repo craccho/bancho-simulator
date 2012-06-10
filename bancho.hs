@@ -82,16 +82,30 @@ defaultSlotState = SlotState {
 getBB :: GameState (BBType, Int)
 getBB = do
   s <- get
-  let table = case mode s of
+  let reg = regulation s
+      table = case mode s of
         Reset ->
           bbt 0.26 0.732 0.008
-        NormalA -> case regulation s of
+        NormalA -> case reg of
           S1 -> bbt 0.500 0.485 0.016
           S2 -> bbt 0.530 0.454 0.016
           S3 -> bbt 0.500 0.485 0.016
           S4 -> bbt 0.530 0.454 0.016
           S5 -> bbt 0.484 0.500 0.016
           S6 -> bbt 0.435 0.549 0.016
+        NormalB -> case reg of
+          S6 -> bbt 84.0 8.0 8.0
+          otherwise -> bbt 90.0 5.0 5.0
+        HighA -> case reg of
+          S1 -> bbt 43.1 42.7 14.2
+          S2 -> bbt 39.4 46.4 14.2
+          S3 -> bbt 40.6 45.2 14.2
+          S4 -> bbt 39.4 46.4 14.2
+          S5 -> bbt 38.5 47.3 14.2
+          S6 -> bbt 28.4 57.4 14.2
+        HighB -> case reg of
+          S6 -> bbt 34.6 39.7 25.7
+          otherwise -> bbt 39.4 34.9 25.7
       bbt rb bbr bbb = [(Regular, rb), (RedBB, bbr), (BlueBB, bbb)]
   bbType <- feedProb $ select table
   bbLimit <- case bbType of
@@ -157,6 +171,40 @@ getNormalLimit = do
         l -> zip [head ptable ..] (replicate l (1 / fromIntegral l))
   feedProb $ select rtable
 
+nextMode :: GameState Mode
+nextMode = do
+  s <- get
+  let reg = regulation s
+      table = case mode s of
+        Reset -> ta
+        NormalA -> ta
+        NormalB -> case reg of
+          S1 -> mt 0 50.0 50.0 0
+          S2 -> mt 0 60.0 40.0 0
+          S3 -> mt 0 45.0 55.0 0
+          S4 -> mt 0 55.0 45.0 0
+          S5 -> mt 0 35.0 65.0 0
+          S6 -> mt 0 40.0 60.0 0
+        HighA -> case reg of
+          S1 -> mt 58.4 0 41.2 0.4
+          S2 -> mt 72.4 0 27.2 0.4
+          S3 -> mt 55.2 0 44.0 0.8
+          S4 -> mt 69.5 0 30.2 0.4
+          S5 -> mt 50.1 0 48.3 1.6
+          S6 -> mt 84.9 0 15.0 0.1
+        HighB -> case reg of
+          S6 -> mt 0 0 99.9 0.1
+          otherwise -> mt 0 0 50.0 50.0
+      ta = case reg of
+        S1 -> mt 79.6 6.7 13.7 0
+        S2 -> mt 73.6 9.8 16.6 0
+        S3 -> mt 78.2 7.0 14.8 0
+        S4 -> mt 69.0 11.2 19.8 0
+        S5 -> mt 76.9 7.3 15.8 0
+        S6 -> mt 57.5 17.5 25.0 0
+      mt na nb ha hb = [(NormalA, na), (NormalB, nb), (HighA, ha), (HighB, hb)]
+  feedProb $ select table
+
 processPartialCount :: GameState Int
 processPartialCount = do
   s <- get
@@ -166,11 +214,13 @@ processPartialCount = do
     RNormal -> do
       if pp > lg then do
         (bbType, newLimit) <- getBB
+        mode <- nextMode
         put $ s {
           partialPlayCount = 0 ,
           limitGameCount = newLimit ,
           replayMode = RBonus ,
-          bbType = bbType
+          bbType = bbType ,
+          mode = mode
           }
         return newLimit
       else do
@@ -284,7 +334,9 @@ feedProb f = do
   put $ s {gen = g}
   return $ f p
 
-play :: GameState (Combination, Int)
+type ToLog = Int
+
+play :: GameState ToLog
 play = do
   s <- get
   c <- feedProb $ combiPick (regulation s) (replayMode s)
@@ -294,7 +346,8 @@ play = do
                     partialPlayCount = (partialPlayCount s) + 1
   }
   processPartialCount
-  return (c, payout)
+  s <- get
+  return $ medals s
 
 playUntil :: Int -> GameState Int
 playUntil m = do
@@ -307,7 +360,7 @@ initialState reg = do
   g <- getStdGen
   return $ defaultSlotState { replayMode = RNormal, gen = g, regulation = reg }
 
-simulate :: Regulation -> Int -> IO ([(Combination, Int)], SlotState)
+simulate :: Regulation -> Int -> IO ([ToLog], SlotState)
 simulate reg g = do
   s <- initialState reg
   let log = (`runState` s) $ sequence $ replicate g play
